@@ -26,12 +26,12 @@ jobs:
       - name: Get VM External IP
         id: get-ip
         run: |
-          IP=$(gcloud compute instances describe ${{ secrets.VM_NAME }} \
-            --zone=${{ secrets.VM_ZONE }} \
-            --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
-          echo "vm_ip=$IP" >> $GITHUB_OUTPUT
+          IP=$(gcloud compute instances describe "${{ secrets.VM_NAME }}" \
+            --zone="${{ secrets.VM_ZONE }}" \
+            --format="get(networkInterfaces[0].accessConfigs[0].natIP)")
+          echo "vm_ip=$IP" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to VM
+      - name: Deploy to VM via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ steps.get-ip.outputs.vm_ip }}
@@ -40,14 +40,18 @@ jobs:
           script: |
             set -e
 
-            APP_DIR="/home/${USER}/fastapi-demo-app"
+            # Variables
+            APP_DIR="/home/${{ secrets.VM_USER }}/fastapi-demo-app"
             SERVICE_NAME="fastapi"
             SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
             REPO_URL="https://github.com/MANOVIGNESH-S/ci-cd.git"
 
-            mkdir -p "$APP_DIR"
+            # Prepare Directory
+            sudo mkdir -p "$APP_DIR"
+            sudo chown ${{ secrets.VM_USER }}:${{ secrets.VM_USER }} "$APP_DIR"
             cd "$APP_DIR"
 
+            # Git Operations
             if [ ! -d ".git" ]; then
               git init
               git remote add origin "$REPO_URL"
@@ -58,6 +62,7 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
+            # Environment Setup
             if [ ! -d "venv" ]; then
               python3 -m venv venv
             fi
@@ -66,24 +71,29 @@ jobs:
             pip install --upgrade pip
             pip install -r requirements.txt
 
+            # Systemd Service Creation
             sudo tee "$SERVICE_FILE" > /dev/null <<EOF
             [Unit]
             Description=FastAPI Application
             After=network.target
 
             [Service]
-            User=${USER}
+            User=${{ secrets.VM_USER }}
             WorkingDirectory=$APP_DIR
             ExecStart=$APP_DIR/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
             Restart=always
             RestartSec=5
-            Environment=PATH=$APP_DIR/venv/bin
+            Environment="PATH=$APP_DIR/venv/bin"
 
             [Install]
             WantedBy=multi-user.target
             EOF
 
+            # Restart Service
             sudo systemctl daemon-reload
             sudo systemctl enable $SERVICE_NAME
             sudo systemctl restart $SERVICE_NAME
+            
+            # Brief pause to let it boot
+            sleep 2
             sudo systemctl status $SERVICE_NAME --no-pager
