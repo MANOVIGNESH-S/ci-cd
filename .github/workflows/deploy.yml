@@ -47,8 +47,10 @@ jobs:
             REPO_URL="https://github.com/MANOVIGNESH-S/ci-cd.git"
 
             # Prepare Directory
+            sudo rm -rf "$APP_DIR"
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
+
 
 
             # Git Operations
